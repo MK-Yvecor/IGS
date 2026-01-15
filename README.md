@@ -10,13 +10,13 @@ Jan Rybak
 
 Specification of flight controller:
 
-🖥️ ESP32-S3R8 (FLASH 16MB, 8MB PSRAM OPI),
-🟢 Staus diode WS2812B.
-🌍 GNSS Quectel L86
-📡LoRa RFM98W-433S2
+- 🖥️ ESP32-S3R8 (FLASH 16MB, 8MB PSRAM OPI),
+- 🟢 Staus diode WS2812B.
+- 🌍 GNSS Quectel L86
+- 📡LoRa RFM98W-433S2
 
 Current version of code:
 
-🧷 Performs a test of PSRAM and FLASH initialization,
-📚 Blinks the status diode,
-🔧 (Code documentation - work in progress) 🔧
+- 🧷 Performs a test of PSRAM and FLASH initialization,
+- 📚 Blinks the status diode,
+- 🔧 (Code documentation - work in progress) 🔧
