@@ -2,6 +2,7 @@
 #include <RadioLib.h>
 #include <Adafruit_NeoPixel.h>
 #include <TinyGPS++.h>
+#include <string.h>
 
 #define L_CS 8
 #define L_DIO0 9
@@ -19,11 +20,10 @@ const int rxPin = 18; // TX z L86
 const int txPin = 17; // RX z L86
 
 TinyGPSPlus gps;
-
-
 float PSRAM_SIZE;
 float FLASH_SIZE;
 String msg;
+double test = 134.456;
 
 SPIClass spiLoRa(FSPI);
 Adafruit_NeoPixel WS2812B(LED_COUNT, LED_PIN, NEO_GRBW + NEO_KHZ800);
@@ -31,24 +31,23 @@ SX1278 radio = new Module(L_CS, L_DIO0, L_RST, -1, spiLoRa);
 
 void setup() {
   // put your setup code here, to run once:
+
   Serial.begin(115200);
+  WS2812B.begin();
+  WS2812B.setPixelColor(0,0,10,0);
+  WS2812B.show();
   Serial1.begin(9600, SERIAL_8N1, rxPin, txPin);
 
   pinMode(resetPin, OUTPUT);
   digitalWrite(resetPin, LOW);
   delay(500);
   digitalWrite(resetPin, HIGH);
-
-  WS2812B.begin();
   delay(5000);
-
-  Serial.println("System uruchomiony. Czekam na dane z Hardware UART...");
 
   spiLoRa.begin(SCK, MISO, MOSI, L_CS);
   int state = radio.begin(433.0, 125.0, 9, 7, 0x12, 17);
     if(state != RADIOLIB_ERR_NONE){
     WS2812B.setPixelColor(0,50,0,0);
-    WS2812B.show();
     Serial.print("Failed to initialize LoRa, ERR Code: ");
     Serial.println(state);
     delay(3000);
@@ -86,20 +85,154 @@ void wyswietlStatystyki() {
   Serial.println(gps.satellites.value());
 }
 
+template <typename T> char GetType();
+template<> char GetType<int>() { return 'i'; }
+template<> char GetType<double>() { return 'd'; }
+
+template <typename input>
+void UartSend(input value){
+  char dataType = GetType<decltype(value)>();
+  byte* b = (byte*)(void*)&value;
+  Serial.write(0xFF);
+  Serial.write("TE");
+  Serial.write(dataType);
+  Serial.write(byte(sizeof(value)));
+  Serial.write(b, sizeof(value));
+  Serial.write(0xF0);
+}
+
+
+typedef void (*CommandCallback)(float value);
+
+struct Command {
+    const char* name;
+    CommandCallback func;
+};
+
+
+void cmd_setFreq(float value){
+  Serial.println(value);
+}
+
+void cmd_R_IMU(float value){
+  Serial.println(value);
+}
+
+void cmd_C_IMU(float value){
+  Serial.println(value);
+}
+
+
+Command commands[] = {
+    {"LoRaF",  cmd_setFreq},
+    {"R_IMU", cmd_R_IMU},
+    {"C_IMU", cmd_C_IMU},
+};
+
+
+void HandleCommand(char* commandr, float value) {
+
+  for(int i = 0; i<=1; i++){
+      if(strcmp(commandr, commands[i].name)== 0){
+        commands[i].func(value);
+      }
+  }
+}
+
+#define CMD_LEN 6
+#define MAX_DATA_LEN 64 
+
+
+enum ParserState {
+  Idle,
+  CommandRead,
+  DataLength,
+  Data,
+  EndByte
+};
+
+ParserState _parserstate = Idle;
+
+
+byte command[CMD_LEN];
+byte data_arr[MAX_DATA_LEN];
+
+uint8_t command_index = 0;
+uint8_t data_index = 0;
+uint8_t data_length = 0;
+
+
+void resetParser() {
+  command_index = 0;
+  data_index = 0;
+  data_length = 0;
+  _parserstate = Idle;
+}
+
+void UartParse(byte b) {
+
+  if (b == 0xFF) {
+    _parserstate = CommandRead;
+    command_index = 0;
+    data_index = 0;
+    data_length = 0;
+    return;
+  }
+
+  switch (_parserstate) {
+
+    case Idle:
+      break;
+
+      case CommandRead:
+      command[command_index++] = b;
+
+          if (command_index == 5) { 
+            command[5] = '\0';
+            _parserstate = DataLength;
+          }
+      break;
+
+    case DataLength:
+      data_length = b;
+
+      if (data_length > MAX_DATA_LEN) {
+        resetParser();
+        break;
+      }
+
+      if (data_length == 0) {
+        _parserstate = EndByte;
+      } else {
+        data_index = 0;
+        _parserstate = Data;
+      }
+      break;
+
+    case Data:
+      data_arr[data_index++] = b;
+
+      if (data_index >= data_length) {
+        _parserstate = EndByte;
+      }
+      break;
+
+    case EndByte:
+      if (b == 0xF0) {
+        HandleCommand((char*)command, 100.2f);
+      }
+
+      resetParser();
+      break;
+  }
+}
 
 void loop() {
-  // put your main code here, to run repeatedly:
-  /*Serial.print("PSRAM SIZE [KB]: ");
-  Serial.println(PSRAM_SIZE / 1024);
-  Serial.print("PSRAM SIZE [MB]: ");
-  Serial.println(PSRAM_SIZE / 1024 / 1024);
+  while (Serial.available() > 0) {
+    byte b = Serial.read();
+    UartParse(b);
+  }
 
-  Serial.println("-=-=-=-=-=-=-=-=-=-=-=-=");
-
-  Serial.print("FLASH SIZE [KB]: ");
-  Serial.println(FLASH_SIZE / 1024);
-  Serial.print("FLASH SIZE [MB]: ");
-  Serial.println(FLASH_SIZE / 1024 / 1024);*/
 
 
   int state = radio.receive(msg);
@@ -119,9 +252,8 @@ void loop() {
     Serial.println("RX Failed");
   }
   
-  /*while (Serial1.available() > 0) {
+  while (Serial1.available() > 0) {
     char c = Serial1.read();
-    // DEBUG: Odkomentuj linię poniżej, jeśli chcesz widzieć surowe dane NMEA
     // Serial.print(c); 
     
     if (gps.encode(c)) {
@@ -136,11 +268,5 @@ void loop() {
       Serial.println("BŁĄD: Serial1 żyje, ale nie widzę ramek NMEA. Sprawdź RX/TX!");
     }
     lastCheck = millis();
-  }*/
-  /*Serial.write(0xFF);
-  Serial.write("TE");
-  Serial.write(0xF0);
-  Serial.println();*/
-
-  //delay(1000);
+}
 }
